@@ -118,9 +118,117 @@ class JsonifyView(BrowserView):
         return self.push_json(objs)
 
     def push_json(self, objs):
-        try:
-            JSON = json.dumps(objs)
-            self.request.response.setHeader("Content-type", "application/json")
-            return JSON
-        except Exception, e:
-            return 'ERROR: wrapped object is not serializable: %s' % str(e)
+        mongodb_ids = []
+        for obj in objs:
+
+            ### TODO
+            # attachments, limit mongodb? 16 mb
+            # versende-tasks, versende-status
+            # uebernahme message-ids, seq-ids
+            # vokabularien
+            # registries plone control panel
+
+            try:
+
+                ### adjust
+                adjusted_data = self.adjust(obj)
+
+                ### use custom EMS JSON Encoder to make data available for json dumping
+                json_data = json.dumps(adjusted_data, cls=EMSEncoder)
+                result = self.save(json.loads(json_data))
+                mongodb_ids.append(result)
+                #JSON = json.dumps(objs, cls=EMSEncoder)
+                #self.request.response.setHeader("Content-type", "application/json")
+                #return JSON
+            except Exception, e:
+                import pdb;pdb.set_trace()
+                print str(e)
+                pass
+                #return 'ERROR: wrapped object is not serializable: %s' % str(e)
+        return mongodb_ids
+
+    def save(self, obj):
+        from pymongo import MongoClient
+        results = []
+
+        events_cts = [
+            'Incident',
+            'Activity_Unplanned',
+            'Activity_AddService',
+            'Activity_Freetext',
+            'Allocator',
+            'Message',
+            'ActivityMessage',
+            'Recommendation',
+            'FileAttachment',
+            'ImageAttachment'
+        ]
+
+        vocabs_cts = [
+            'AliasVocabulary',
+            'SimpleVocabulary',
+            'SimpleVocabularyTerm',
+            'SortedSimpleVocabulary',
+            'TreeVocabulary',
+            'TreeVocabularyTerm',
+            'VdexFileVocabular',
+            'VocabularyLibrary'
+        ]
+
+        client = MongoClient(host='mongodb2', port=27017)
+        db = client.migration
+
+        # events
+        if '_type' in obj.keys() and obj['_type'] in events_cts:
+            result = db.events.save(obj)
+        # vocabs
+        elif '_type' in obj.keys() and obj['_type'] in vocabs_cts:
+            result = db.vocabs.save(obj)
+        # cms
+        else:
+            result = db.cms.save(obj)
+
+        results.append(result)
+        return results
+
+    def adjust(self, obj):
+
+        ### Templates: fields: firstmsg, mainmsg, endmsg
+        ### process data, because type is not dict, but ZPublisher.HTTPRequest.record
+        ### NOTE/TODO?: JSONEncoder gives us TypeError after copying record data and casting to dict, needs deeper investigation
+        ### workaround: we prepare data before passing JSONEncoder for now ...
+        fields = ['firstmsg', 'mainmsg', 'endmsg']
+        for field in fields:
+            if field in obj and isinstance(obj[field], list):
+                new_items = []
+                for item in obj[field]:
+                    new_item = dict(item.copy())
+                    new_items.append(new_item)
+                obj[field] = new_items
+
+        ### key '_id' provides plone id (unique in folder only, but not unique in Plone), but mongoDB makes use of '_id' to provide unique id, so we
+        ### a) store '_id' as '_plone_id'
+        ### b) copy '_uid' (unique Plone id) to '_id' to use Plone UID as unique id in mongoDB
+        obj['_plone_id'] = obj['_id']
+        obj['_id'] = obj['_uid']
+        
+        return obj
+
+
+### MH: json encode for EMS specific data
+from datetime import date, datetime
+import json
+from ZPublisher.HTTPRequest import record
+
+class EMSEncoder(json.JSONEncoder):
+    def default(self, o):
+        # datetime, date
+        if isinstance(o, (datetime, date)):
+            return o.isoformat()
+
+        # HTTPRequest.record: e.g. firstmsg, mainmsg, endmsg in templates:
+        # cast to dict
+        if isinstance(o, record):
+            return json.JSONEncoder.default(self, dict(o.copy()))
+
+        return json.JSONEncoder.default(self, o)
