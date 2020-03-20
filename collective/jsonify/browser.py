@@ -55,8 +55,10 @@ class JsonifyView(BrowserView):
         return self.push_json(objs)
 
     def action_query(self):
-        #import pdb;pdb.set_trace()
-        return []
+
+        ### TMP
+        self.import_users()
+
         context = aq_inner(self.context)
         catalog = getToolByName(context, 'portal_catalog')
         if self.params:
@@ -148,42 +150,6 @@ class JsonifyView(BrowserView):
                 pass
                 #return 'ERROR: wrapped object is not serializable: %s' % str(e)
 
-        ### TMP user, usergroups
-        ### usergroups
-        import plone.api
-        from pymongo import MongoClient
-
-        client = MongoClient(host='mongodb2', port=27017)
-        db = client.migration
-
-        groups = plone.api.group.get_groups()
-        for group in groups:
-            data = dict(
-                group_id = group.getGroupId(),
-                member_ids = group.getAllGroupMemberIds(),
-                roles = group.getRoles(),
-                properties = group.getProperties()
-            )
-            db.usergroups.save(data)
-
-        ### user
-        passwords = self.context.acl_users.source_users._user_passwords
-        users = plone.api.user.get_users()
-        for user in users:
-            data = dict(
-                user_id = user.getUserName(),
-                password = passwords.get(user.getUserName()),
-                # TODO: getRoles returns roles of usergroups of the user too,
-                # how the get roles assigned to the user?
-                roles = user.getRoles(),
-                fullname = user.fullname,
-                description = user.description,
-                location = user.location,
-                email = user.email,
-                homepage = user.home_page,
-            )
-            db.users.save(data)
-
         return mongodb_ids
 
     def save(self, obj):
@@ -252,6 +218,43 @@ class JsonifyView(BrowserView):
         obj['_id'] = obj['_uid']
         
         return obj
+
+    def import_users(self):
+        ### TMP user, usergroups
+        ### usergroups
+        import plone.api
+        from pymongo import MongoClient
+
+        client = MongoClient(host='mongodb2', port=27017)
+        db = client.migration
+
+        groups = plone.api.group.get_groups()
+        for group in groups:
+            data = dict(
+                group_id = group.getGroupId(),
+                member_ids = group.getAllGroupMemberIds(),
+                roles = group.getRoles(),
+                properties = group.getProperties()
+            )
+            db.usergroups.save(data)
+
+        ### user
+        passwords = self.context.acl_users.source_users._user_passwords
+        users = plone.api.user.get_users()
+        for user in users:
+            data = dict(
+                user_id = user.getUserName(),
+                password = passwords.get(user.getUserName()),
+                # TODO: getRoles returns roles of usergroups of the user too,
+                # how the get roles assigned to the user?
+                roles = user.getRoles(),
+                fullname = user.getProperty('fullname'),
+                description = user.getProperty('description'),
+                location = user.getProperty('location'),
+                email = user.getProperty('email'),
+                homepage = user.getProperty('home_page'),
+            )
+            db.users.save(data)
 
 
 ### MH: json encode for EMS specific data
