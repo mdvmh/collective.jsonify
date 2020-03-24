@@ -57,8 +57,10 @@ class JsonifyView(BrowserView):
     def action_query(self):
 
         ### TMP
-        self.import_users()
-
+        self.export_users()
+        self.export_tasks()
+        #return []
+        
         context = aq_inner(self.context)
         catalog = getToolByName(context, 'portal_catalog')
         if self.params:
@@ -219,7 +221,7 @@ class JsonifyView(BrowserView):
         
         return obj
 
-    def import_users(self):
+    def export_users(self):
         ### TMP user, usergroups
         ### usergroups
         import plone.api
@@ -255,6 +257,26 @@ class JsonifyView(BrowserView):
                 homepage = user.getProperty('home_page'),
             )
             db.users.save(data)
+
+    def export_tasks(self):
+        ### TMP
+
+        from pymongo import MongoClient
+        from zope.component import getUtility
+        from mdv.scheduler.interfaces import IScheduler
+
+        client = MongoClient(host='mongodb2', port=27017)
+        db = client.migration
+
+        scheduler = getUtility(IScheduler)
+        for id, event in scheduler.queue.items():
+            getattr(event, '_', None) # unghostify
+            data = event.__dict__.copy()
+            data['id'] = id
+
+            ### use custom EMS JSON Encoder to make data available for json dumping
+            json_data = json.dumps(data, cls=EMSEncoder)
+            result = db.tasks.save(json.loads(json_data))
 
 
 ### MH: json encode for EMS specific data
